@@ -1,0 +1,436 @@
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>GeoJSONLayer | Sample | ArcGIS API for JavaScript 4.24</title>
+
+    <style>
+        html,
+        body,
+        #viewDiv {
+            padding: 0;
+            margin: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        #topbar {
+            padding: 10px;
+            width: 190px;
+        }
+
+        .style-button {
+            margin: 3px;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            -moz-opacity: 0.4;
+            -webkit-opacity: 0.4;
+            cursor: default;
+        }
+    </style>
+
+    <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/light/main.css" />
+    <script src="https://js.arcgis.com/4.24/"></script>
+
+    <script>
+        require(["esri/Map", "esri/layers/GeoJSONLayer", "esri/views/MapView",
+            "esri/config", "esri/Graphic",
+            "esri/rest/route",
+            "esri/rest/support/RouteParameters",
+            "esri/rest/support/FeatureSet",
+            "esri/layers/GraphicsLayer",
+            "esri/geometry/geometryEngineAsync",
+            "esri/widgets/Sketch/SketchViewModel",
+            "esri/widgets/FeatureTable"], (
+                Map,
+                GeoJSONLayer,
+                MapView,
+                esriConfig,
+                Graphic, route, RouteParameters, FeatureSet, GraphicsLayer, geometryEngineAsync, SketchViewModel, FeatureTable
+            ) => {
+            esriConfig.apiKey = "AAPKd079aa2b03634a29a662c7fcfa2bbf74hXV_Au-DfO2tGrQRo5B-eiOVBpjMV3v8jOmhksKfJigw7DekG5IytFMVWSEWYkMM";
+
+            // If GeoJSON files are not on the same domain as your website, a CORS enabled server
+            // or a proxy is required.
+            const url =
+                "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson";
+
+            // Paste the url into a browser's address bar to download and view the attributes
+            // in the GeoJSON file. These attributes include:
+            // * mag - magnitude
+            // * type - earthquake or other event such as nuclear test
+            // * place - location of the event
+            // * time - the time of the event
+            // Use the Arcade Date() function to format time field into a human-readable format
+
+            const template = {
+                title: "Earthquake Info",
+                content: "Magnitude {mag} {type} hit {place} on {time}",
+                fieldInfos: [
+                    {
+                        fieldName: "time",
+                        format: {
+                            dateFormat: "short-date-short-time"
+                        }
+                    }
+                ]
+            };
+
+            const renderer = {
+                type: "simple",
+                field: "mag",
+                symbol: {
+                    type: "simple-marker",
+                    color: "orange",
+                    outline: {
+                        color: "white"
+                    }
+                },
+                visualVariables: [
+                    {
+                        type: "size",
+                        field: "mag",
+                        stops: [
+                            {
+                                value: 2.5,
+                                size: "4px"
+                            },
+                            {
+                                value: 8,
+                                size: "40px"
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            const shopsLayer = new GeoJSONLayer({
+                url: 'Shops_Location_FeaturesToJSO.geojson',
+                excludedEffect: "grayscale(100%) opacity(10%)",
+                renderer: renderer,
+            });
+
+            const startPointsLayer = new GeoJSONLayer({
+                url: 'Start_Point_FeaturesToJSO.geojson',
+                copyright: "USGS Earthquakes",
+                renderer: renderer
+            });
+            let startPointGraphic = null;
+            const query = {
+                outFields: ["*"],
+                returnGeometry: true
+            };
+
+            // query graphics from the csv layer view. Geometry set for the query
+            // can be polygon for point features and only intersecting geometries are returned
+            startPointsLayer
+                .queryFeatures(query)
+                .then((results) => {
+                    startPointGraphic = new Graphic({ geometry: results.features[0].geometry });
+                });
+
+            const serviceAreasLayer = new GeoJSONLayer({
+                url: 'Distribution_Area_FeaturesToJSO.geojson',
+                copyright: "USGS Earthquakes",
+            });
+
+            const map = new Map({
+                basemap: "osm",
+                layers: [shopsLayer, startPointsLayer]
+            });
+
+            const view = new MapView({
+                container: "viewDiv",
+                center: [35.911971501779135, 31.953851809317573],
+                zoom: 11,
+                map: map
+            });
+
+            const polygonGraphicsLayer = new GraphicsLayer();
+            map.add(polygonGraphicsLayer);
+
+            // add the select by rectangle button the view
+            view.ui.add("select-by-rectangle", "top-left");
+            view.ui.add("topbar", "top-right");
+
+            // add the clear selection button the view
+            view.ui.add("clear-selection", "top-left");
+
+            // create a new instance of a FeatureTable
+            const featureTable = new FeatureTable({
+                view: view,
+                layer: shopsLayer,
+                highlightOnRowSelectEnabled: false,
+                fieldConfigs: [
+                    {
+                        name: "كود_ا",
+                        label: "Code"
+                    },
+                    {
+                        name: "DISTRECT_2",
+                        label: "District"
+                    }
+                ],
+                container: document.getElementById("tableDiv")
+            });
+
+            // this array will keep track of selected feature objectIds to
+            // sync the layerview feature effects and feature table selection
+            let features = [];
+            let featuresGraphics = [];
+            // Listen for the table's selection-change event
+            featureTable.on("selection-change", (changes) => {
+                // if the feature is unselected then remove the objectId
+                // of the removed feature from the features array
+                changes.removed.forEach((item) => {
+                    const data = features.find((data) => {
+                        return data === item.objectId;
+                    });
+                    if (data) {
+                        features.splice(features.indexOf(data), 1);
+                    }
+                });
+
+                // If the selection is added, push all added selections to array
+                changes.added.forEach((item) => {
+                    features.push(item.objectId);
+                });
+
+                // set excluded effect on the features that are not selected in the table
+                shopsLayer.featureEffect = {
+                    filter: {
+                        objectIds: features
+                    },
+                    excludedEffect: "blur(5px) grayscale(90%) opacity(40%)"
+                };
+            });
+
+            const routeUrl = "https://route-api.arcgis.com/arcgis/rest/services/World/Route/NAServer/Route_World";
+
+            // view.on("click", function (event) {
+
+            //     if (view.graphics.length === 0) {
+            //         addGraphic("origin", event.mapPoint);
+            //     } else if (view.graphics.length === 1) {
+            //         addGraphic("destination", event.mapPoint);
+
+            //         getRoute(); // Call the route service
+
+            //     } else {
+            //         view.graphics.removeAll();
+            //         addGraphic("origin", event.mapPoint);
+            //     }
+
+            // });
+
+            const layer12Button = document.getElementById("layer12");
+            const layer16Button = document.getElementById("layer16");
+
+            layer12Button.addEventListener("click", () => {
+                const stat =
+                    "<b>Party switch</b><br/>Democrat - 12 counties <br/ >Republican - 193 counties";
+                getRoute('simple');
+
+            });
+
+            layer16Button.addEventListener("click", () => {
+                getRoute('optimized');
+                const stat =
+                    "<b>Party switch</b><br/>Democrat - 19 counties <br/ >Republican - 219 counties";
+            });
+
+            function addGraphic(type, point) {
+                const graphic = new Graphic({
+                    symbol: {
+                        type: "simple-marker",
+                        color: (type === "origin") ? "white" : "black",
+                        size: "8px"
+                    },
+                    geometry: point
+                });
+                view.graphics.add(graphic);
+            }
+
+            function getRoute(routeType) {
+                const routeParams = new RouteParameters({
+                    stops: new FeatureSet({
+                        features: featuresGraphics
+                    }),
+                    preserveFirstStop: (routeType === 'optimized' ? true : false),
+                    findBestSequence: (routeType === 'optimized' ? true : false),
+                    returnStops: true
+                });
+
+                route.solve(routeUrl, routeParams)
+                    .then(function (data) {
+                        data.routeResults.forEach(function (result) {
+                            result.route.symbol = {
+                                type: "simple-line",
+                                color: [5, 150, 255],
+                                width: 3
+                            };
+                            view.graphics.removeAll();
+                            view.graphics.add(result.route);
+                            const lastStop = result.stops.find((stop) => {
+                                return stop.attributes.ObjectID === result.route.attributes.LastStopID
+                            })
+                            lastStop.symbol = {
+                            type: "simple-marker", // autocasts as new SimpleMarkerSymbol()
+                                color: [226, 119, 40],
+                                    outline: {
+                                // autocasts as new SimpleLineSymbol()
+                                color: [255, 255, 255],
+                                    width: 2
+                            }
+                        };
+                        view.graphics.add(lastStop);
+                        view.goTo(result.route);
+                        const stat =
+                            `<b>Stops:</b>${result.route.attributes.StopCount} <br/> <b>Length(Km):</b>${result.route.attributes.Total_Kilometers.toFixed(2)} <br/ ><b>Time(Minutes):</b>${Math.round(result.route.attributes.Total_TravelTime)}`;
+                        document.getElementById("stats").innerHTML = stat;
+                    });
+
+                // Display directions
+                // if (data.routeResults.length > 0) {
+                //     const directions = document.createElement("ol");
+                //     directions.classList = "esri-widget esri-widget--panel esri-directions__scroller";
+                //     directions.style.marginTop = "0";
+                //     directions.style.padding = "15px 15px 15px 30px";
+                //     const features = data.routeResults[0].directions.features;
+
+                //     // Show each direction
+                //     features.forEach(function (result, i) {
+                //         const direction = document.createElement("li");
+                //         direction.innerHTML = result.attributes.text + " (" + result.attributes.length.toFixed(2) + " miles)";
+                //         directions.appendChild(direction);
+                //     });
+
+                //     view.ui.empty("top-right");
+                //     view.ui.add(directions, "top-right");
+
+                // }
+
+            })
+
+            .catch(function (error) {
+                console.log(error);
+            })
+
+            }
+
+
+        const selectButton = document.getElementById("select-by-rectangle");
+
+        // click event for the select by rectangle button
+        selectButton.addEventListener("click", () => {
+            view.popup.close();
+            sketchViewModel.create("rectangle");
+        });
+
+        document
+            .getElementById("clear-selection")
+            .addEventListener("click", () => {
+                featureTable.clearSelection();
+                featureTable.filterGeometry = null;
+                polygonGraphicsLayer.removeAll();
+                view.graphics.removeAll();
+                featuresGraphics = [];
+                document.getElementById("stats").innerHTML = '';
+                view.center = [35.911971501779135, 31.953851809317573];
+                view.zoom = 11;
+            });
+
+        // create a new sketch view model set its layer
+        const sketchViewModel = new SketchViewModel({
+            view: view,
+            layer: polygonGraphicsLayer
+        });
+
+        // Once user is done drawing a rectangle on the map
+        // use the rectangle to select features on the map and table
+        sketchViewModel.on("create", async (event) => {
+            if (event.state === "complete") {
+                // this polygon will be used to query features that intersect it
+                const geometries = polygonGraphicsLayer.graphics.map(function (
+                    graphic
+                ) {
+                    return graphic.geometry;
+                });
+                const queryGeometry = await geometryEngineAsync.union(
+                    geometries.toArray()
+                );
+                selectFeatures(queryGeometry);
+            }
+        });
+
+        // This function is called when user completes drawing a rectangle
+        // on the map. Use the rectangle to select features in the layer and table
+        function selectFeatures(geometry) {
+            // create a query and set its geometry parameter to the
+            // rectangle that was drawn on the view
+            const query = {
+                geometry: geometry,
+                outFields: ["*"],
+                returnGeometry: true,
+                outSpatialReference: { wkid: 4326 }
+            };
+
+            // query graphics from the csv layer view. Geometry set for the query
+            // can be polygon for point features and only intersecting geometries are returned
+            shopsLayer
+                .queryFeatures(query)
+                .then((results) => {
+                    if (results.features.length === 0) {
+                        clearSelection();
+                    } else {
+                        // pass in the query results to the table by calling its selectRows method.
+                        // This will trigger FeatureTable's selection-change event
+                        // where we will be setting the feature effect on the csv layer view
+                        featureTable.filterGeometry = geometry;
+                        featureTable.selectRows(results.features);
+                        featuresGraphics = [...results.features];
+                        featuresGraphics = featuresGraphics.map((feature) => {
+                            return new Graphic({ geometry: feature.geometry });
+                        });
+                        featuresGraphics.unshift(startPointGraphic);
+                    }
+                })
+                .catch(errorCallback);
+        }
+
+        function errorCallback(error) {
+            console.log("error happened:", error.message);
+        }
+        });
+    </script>
+</head>
+
+<body>
+    <div id="viewDiv"></div>
+    <div id="select-by-rectangle" class="esri-widget esri-widget--button esri-widget esri-interactive"
+        title="Select features by rectangle">
+        <span class="esri-icon-checkbox-unchecked"></span>
+    </div>
+    <div id="clear-selection" class="esri-widget esri-widget--button esri-widget esri-interactive"
+        title="Clear selection">
+        <span class="esri-icon-erase"></span>
+    </div>
+    <div class="container">
+        <div id="tableDiv"></div>
+    </div>
+    <div id="topbar" class="esri-widget">
+        <h3 class="esri-heading">Route</h3>
+        <button class="esri-button style-button" id="layer12" type="button">
+            Simple Route
+        </button>
+        <button class="esri-button style-button" id="layer16" type="button">
+            Optimized Route
+        </button>
+        <p class="esri-content" id="stats"></p>
+    </div>
+</body>
+
+</html>
